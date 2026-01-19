@@ -16,6 +16,10 @@ import (
 
 func main() {
 	var (
+		logLevel = kingpin.Flag(
+			"log.level",
+			"Log level for structured logging (debug, info, warn, error).",
+		).Default("debug").Enum("debug", "info", "warn", "error")
 		listenAddress = kingpin.Flag(
 			"web.listen-address",
 			"Address to listen on for web interface and telemetry.").Short('l').Default(":9282").String()
@@ -37,10 +41,14 @@ func main() {
 		).Default("").String()
 		rtpEnable = kingpin.Flag("rtp.enable", "enable rtp info(feature:todo!), default: fasle").Default("false").Bool()
 	)
-	promlogConfig := &promlog.Config{}
 	kingpin.Version("freeswitch_exporter\nversion: 1.0.6")
-	logger := promlog.New(promlogConfig)
 	kingpin.Parse()
+
+	promlogConfig := &promlog.Config{}
+	if err := promlogConfig.Level.Set(*logLevel); err != nil {
+		panic(fmt.Sprintf("invalid log level %q: %v", *logLevel, err))
+	}
+	logger := promlog.New(promlogConfig)
 
 	c, err := NewCollector(*scrapeURI, *timeout, *password, *rtpEnable)
 
