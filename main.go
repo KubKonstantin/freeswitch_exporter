@@ -45,12 +45,14 @@ func main() {
 	kingpin.Parse()
 
 	promlogConfig := &promlog.Config{}
+	promlogConfig.Level = &promlog.AllowedLevel{}   // ensure level flag has a target
+	promlogConfig.Format = &promlog.AllowedFormat{} // keep format configurable
 	if err := promlogConfig.Level.Set(*logLevel); err != nil {
 		panic(fmt.Sprintf("invalid log level %q: %v", *logLevel, err))
 	}
 	logger := promlog.New(promlogConfig)
 
-	c, err := NewCollector(*scrapeURI, *timeout, *password, *rtpEnable)
+	c, err := NewCollector(*scrapeURI, *timeout, *password, *rtpEnable, logger)
 
 	if err != nil {
 		panic(err)
@@ -76,7 +78,7 @@ func main() {
 			target = fmt.Sprintf("tcp://%s", target)
 		}
 
-		c, colErr := NewCollector(target, *timeout, *password, *rtpEnable)
+		c, colErr := NewCollector(target, *timeout, *password, *rtpEnable, logger)
 		if colErr != nil {
 			http.Error(w, fmt.Sprintf("failed to create collector for %s: %s", target, colErr), http.StatusInternalServerError)
 		}
