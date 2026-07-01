@@ -119,8 +119,8 @@ The exporter will try to fetch values from the following commands:
 - `api show codec` all used codec
 - `registration` all sofia registration details
 - `api memory` get freeswitch memory info
-- `api show calls as json` grouped by the `data` channel variable
-- `api show bridged_calls as json` grouped by the `data` channel variable
+- `api show calls` grouped by the `data` channel variable
+- `api show bridged_calls` grouped by the `data` channel variable
 
 List of exposed metrics:
 
@@ -225,7 +225,7 @@ List of exposed metrics:
 
 ### Grouped call metrics
 
-To expose call counts per user group, set a FreeSWITCH channel variable named `data` in the dialplan, for example `set data=sales`. The exporter reads this value from `api show calls as json` and `api show bridged_calls as json` and exports:
+To expose call counts per user group, set a FreeSWITCH channel variable named `data` in the dialplan, for example `set data=sales`. The exporter reads this value from `api show calls` and `api show bridged_calls` and exports:
 
 - `freeswitch_current_calls_by_group{group="..."}`
 - `freeswitch_bridged_calls_by_group{group="..."}`

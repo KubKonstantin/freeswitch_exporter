@@ -43,3 +43,21 @@ func TestCallGroup(t *testing.T) {
 		})
 	}
 }
+
+func TestParseShowRows(t *testing.T) {
+	response := []byte("uuid,direction,presence_data,variable_data\nabc,inbound,sales,\ndef,outbound,,support\n\n2 total.\n")
+
+	rows, err := parseShowRows(response)
+	if err != nil {
+		t.Fatalf("parseShowRows() error = %v", err)
+	}
+	if got, want := len(rows), 2; got != want {
+		t.Fatalf("len(rows) = %d, want %d", got, want)
+	}
+	if got, want := callGroup(rows[0]), "sales"; got != want {
+		t.Fatalf("callGroup(rows[0]) = %q, want %q", got, want)
+	}
+	if got, want := callGroup(rows[1]), "support"; got != want {
+		t.Fatalf("callGroup(rows[1]) = %q, want %q", got, want)
+	}
+}
