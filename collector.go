@@ -313,6 +313,10 @@ func (c *Collector) scrape(ch chan<- prometheus.Metric) error {
 		return err
 	}
 
+	if err = c.groupCallMetrics(ch); err != nil {
+		return err
+	}
+
 	if err = c.vertoMetrics(ch); err != nil {
 		return err
 	}
@@ -685,6 +689,94 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 		ch <- cc_load
 	}
 	return nil
+}
+
+func (c *Collector) groupCallMetrics(ch chan<- prometheus.Metric) error {
+	groupedMetrics := []struct {
+		name    string
+		help    string
+		command string
+	}{
+		{
+			name:    "current_calls_by_group",
+			help:    "Number of active calls by FreeSWITCH data channel variable",
+			command: "api show detailed_calls as json",
+		},
+		{
+			name:    "bridged_calls_by_group",
+			help:    "Number of bridged calls by FreeSWITCH data channel variable",
+			command: "api show detailed_bridged_calls as json",
+		},
+	}
+
+	for _, metricDef := range groupedMetrics {
+		groups, err := c.fetchGroupedCallCounts(metricDef.command)
+		if err != nil {
+			return err
+		}
+
+		for group, count := range groups {
+			metric, err := prometheus.NewConstMetric(
+				prometheus.NewDesc(namespace+"_"+metricDef.name, metricDef.help, []string{"group"}, nil),
+				prometheus.GaugeValue,
+				float64(count),
+				group,
+			)
+			if err != nil {
+				return err
+			}
+
+			ch <- metric
+		}
+	}
+
+	return nil
+}
+
+func (c *Collector) fetchGroupedCallCounts(command string) (map[string]int, error) {
+	response, err := c.fsCommand(command)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Rows []map[string]interface{} `json:"rows"`
+	}
+	if err := json.Unmarshal(response, &result); err != nil {
+		return nil, fmt.Errorf("failed read JSON response for command %s: %w", command, err)
+	}
+
+	groups := make(map[string]int)
+	for _, row := range result.Rows {
+		group := callGroup(row)
+		if group == "" {
+			continue
+		}
+		groups[group]++
+	}
+
+	return groups, nil
+}
+
+func callGroup(row map[string]interface{}) string {
+	for _, key := range []string{"data", "variable_data"} {
+		if value, ok := row[key].(string); ok && value != "" {
+			return value
+		}
+	}
+
+	variables, ok := row["variables"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	for _, key := range []string{"data", "variable_data"} {
+		if value, ok := variables[key].(string); ok && value != "" {
+			return value
+		}
+	}
+
+	return ""
 }
 
 func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
