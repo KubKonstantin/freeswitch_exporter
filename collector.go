@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -310,6 +312,10 @@ func (c *Collector) scrape(ch chan<- prometheus.Metric) error {
 		return err
 	}
 	if err = c.registrationsMetrics(ch); err != nil {
+		return err
+	}
+
+	if err = c.groupCallMetrics(ch); err != nil {
 		return err
 	}
 
@@ -685,6 +691,152 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 		ch <- cc_load
 	}
 	return nil
+}
+
+func (c *Collector) groupCallMetrics(ch chan<- prometheus.Metric) error {
+	groupedMetrics := []struct {
+		name    string
+		help    string
+		command string
+	}{
+		{
+			name:    "current_calls_by_group",
+			help:    "Number of active calls by FreeSWITCH data channel variable",
+			command: "api show calls",
+		},
+		{
+			name:    "bridged_calls_by_group",
+			help:    "Number of bridged calls by FreeSWITCH data channel variable",
+			command: "api show bridged_calls",
+		},
+	}
+
+	for _, metricDef := range groupedMetrics {
+		groups, err := c.fetchGroupedCallCounts(metricDef.command)
+		if err != nil {
+			level.Debug(c.logger).Log("msg", "failed to fetch grouped call metrics", "metric", metricDef.name, "err", err)
+			continue
+		}
+
+		for group, count := range groups {
+			metric, err := prometheus.NewConstMetric(
+				prometheus.NewDesc(namespace+"_"+metricDef.name, metricDef.help, []string{"group"}, nil),
+				prometheus.GaugeValue,
+				float64(count),
+				group,
+			)
+			if err != nil {
+				return err
+			}
+
+			ch <- metric
+		}
+	}
+
+	return nil
+}
+
+func (c *Collector) fetchGroupedCallCounts(command string) (map[string]int, error) {
+	response, err := c.fsCommand(command)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := groupedCallRows(response)
+	if err != nil {
+		return nil, fmt.Errorf("failed parse response for command %s: %w", command, err)
+	}
+
+	groups := make(map[string]int)
+	for _, row := range rows {
+		group := callGroup(row)
+		if group == "" {
+			continue
+		}
+		groups[group]++
+	}
+
+	return groups, nil
+}
+
+func groupedCallRows(response []byte) ([]map[string]interface{}, error) {
+	var result struct {
+		Rows []map[string]interface{} `json:"rows"`
+	}
+	if err := json.Unmarshal(response, &result); err == nil {
+		return result.Rows, nil
+	}
+
+	return parseShowRows(response)
+}
+
+func parseShowRows(response []byte) ([]map[string]interface{}, error) {
+	lines := make([]string, 0)
+	scanner := bufio.NewScanner(bytes.NewReader(response))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "+OK") || strings.HasSuffix(line, " total.") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(lines) == 0 {
+		return nil, nil
+	}
+
+	header, err := parseCSVLine(lines[0])
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]map[string]interface{}, 0, len(lines)-1)
+	for _, line := range lines[1:] {
+		fields, err := parseCSVLine(line)
+		if err != nil {
+			return nil, err
+		}
+		row := make(map[string]interface{}, len(header))
+		for i, key := range header {
+			if i >= len(fields) {
+				break
+			}
+			row[key] = fields[i]
+		}
+		rows = append(rows, row)
+	}
+
+	return rows, nil
+}
+
+func parseCSVLine(line string) ([]string, error) {
+	reader := csv.NewReader(strings.NewReader(line))
+	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
+	return reader.Read()
+}
+
+func callGroup(row map[string]interface{}) string {
+	for _, key := range []string{"data", "presence_data", "variable_data"} {
+		if value, ok := row[key].(string); ok && value != "" {
+			return value
+		}
+	}
+
+	variables, ok := row["variables"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	for _, key := range []string{"data", "presence_data", "variable_data"} {
+		if value, ok := variables[key].(string); ok && value != "" {
+			return value
+		}
+	}
+
+	return ""
 }
 
 func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {

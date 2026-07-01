@@ -118,7 +118,9 @@ The exporter will try to fetch values from the following commands:
 - `api show endpoint` all used endpoint
 - `api show codec` all used codec
 - `registration` all sofia registration details
-- `api memory` get freeswitch memory info 
+- `api memory` get freeswitch memory info
+- `api show calls` grouped by the `data` channel variable
+- `api show bridged_calls` grouped by the `data` channel variable
 
 List of exposed metrics:
 
@@ -129,6 +131,10 @@ List of exposed metrics:
 # TYPE freeswitch_current_calls gauge
 # HELP freeswitch_current_channels Number of channels active
 # TYPE freeswitch_current_channels gauge
+# HELP freeswitch_current_calls_by_group Number of active calls by FreeSWITCH data channel variable
+# TYPE freeswitch_current_calls_by_group gauge
+# HELP freeswitch_bridged_calls_by_group Number of bridged calls by FreeSWITCH data channel variable
+# TYPE freeswitch_bridged_calls_by_group gauge
 # HELP freeswitch_current_idle_cpu CPU idle
 # TYPE freeswitch_current_idle_cpu gauge
 # HELP freeswitch_current_sessions Number of sessions active
@@ -216,6 +222,15 @@ List of exposed metrics:
 # HELP freeswitch_memory_usmblks Max. total allocated space
 # TYPE freeswitch_memory_usmblks gauge
 ```
+
+### Grouped call metrics
+
+To expose call counts per user group, set a FreeSWITCH channel variable named `data` in the dialplan, for example `set data=sales`. The exporter reads this value from `api show calls` and `api show bridged_calls` and exports:
+
+- `freeswitch_current_calls_by_group{group="..."}`
+- `freeswitch_bridged_calls_by_group{group="..."}`
+
+Calls without the `data` variable are skipped for grouped metrics and still remain included in the existing aggregate call metrics.
 
 ## Compiling
 
