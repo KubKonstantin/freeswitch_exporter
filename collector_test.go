@@ -14,6 +14,11 @@ func TestCallGroup(t *testing.T) {
 			want: "sales",
 		},
 		{
+			name: "top-level presence_data",
+			row:  map[string]interface{}{"presence_data": "support"},
+			want: "support",
+		},
+		{
 			name: "top-level variable_data",
 			row:  map[string]interface{}{"variable_data": "support"},
 			want: "support",

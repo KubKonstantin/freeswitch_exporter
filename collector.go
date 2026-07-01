@@ -700,19 +700,20 @@ func (c *Collector) groupCallMetrics(ch chan<- prometheus.Metric) error {
 		{
 			name:    "current_calls_by_group",
 			help:    "Number of active calls by FreeSWITCH data channel variable",
-			command: "api show detailed_calls as json",
+			command: "api show calls as json",
 		},
 		{
 			name:    "bridged_calls_by_group",
 			help:    "Number of bridged calls by FreeSWITCH data channel variable",
-			command: "api show detailed_bridged_calls as json",
+			command: "api show bridged_calls as json",
 		},
 	}
 
 	for _, metricDef := range groupedMetrics {
 		groups, err := c.fetchGroupedCallCounts(metricDef.command)
 		if err != nil {
-			return err
+			level.Debug(c.logger).Log("msg", "failed to fetch grouped call metrics", "metric", metricDef.name, "err", err)
+			continue
 		}
 
 		for group, count := range groups {
@@ -759,7 +760,7 @@ func (c *Collector) fetchGroupedCallCounts(command string) (map[string]int, erro
 }
 
 func callGroup(row map[string]interface{}) string {
-	for _, key := range []string{"data", "variable_data"} {
+	for _, key := range []string{"data", "presence_data", "variable_data"} {
 		if value, ok := row[key].(string); ok && value != "" {
 			return value
 		}
@@ -770,7 +771,7 @@ func callGroup(row map[string]interface{}) string {
 		return ""
 	}
 
-	for _, key := range []string{"data", "variable_data"} {
+	for _, key := range []string{"data", "presence_data", "variable_data"} {
 		if value, ok := variables[key].(string); ok && value != "" {
 			return value
 		}
