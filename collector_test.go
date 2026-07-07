@@ -61,3 +61,23 @@ func TestParseShowRows(t *testing.T) {
 		t.Fatalf("callGroup(rows[1]) = %q, want %q", got, want)
 	}
 }
+
+func TestCleanVariableValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value []byte
+		want  string
+	}{
+		{name: "plain value", value: []byte("sales\n"), want: "sales"},
+		{name: "undefined", value: []byte("_undef_\n"), want: ""},
+		{name: "error", value: []byte("-ERR No such channel!\n"), want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cleanVariableValue(tt.value); got != tt.want {
+				t.Fatalf("cleanVariableValue() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

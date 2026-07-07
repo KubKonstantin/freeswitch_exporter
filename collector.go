@@ -381,7 +381,7 @@ func (c *Collector) loadModuleMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("loadModuleMetrics error: &cfgs", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &cfgs)
+	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", cfgs))
 	fsLoadModules := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "freeswitch_load_module",
@@ -425,7 +425,7 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("sofiaStatusMetrics error: &gw", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &gw)
+	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", gw))
 	for _, gateway := range gw.Gateway {
 		status := 0
 		if gateway.Status == "UP" {
@@ -616,7 +616,7 @@ func (c *Collector) endpointMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("endpointMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &rt)
+	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", rt))
 	for _, ep := range rt.Row {
 		ep_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_endpoint_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": ep.Type.Text, "name": ep.Name.Text, "ikey": ep.Ikey.Text}),
@@ -646,7 +646,7 @@ func (c *Collector) registrationsMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("registrationsMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &rt)
+	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", rt))
 	for _, cc := range rt.Row {
 		cc_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_registration_defails", "freeswitch registration status", nil, prometheus.Labels{"reg_user": cc.RegUser.Text, "hostname": cc.Hostname.Text, "realm": cc.Realm.Text, "token": cc.Token.Text, "url": cc.Url.Text, "expires": cc.Expires.Text, "network_ip": cc.NetworkIp.Text, "network_port": cc.NetworkPort.Text, "network_proto": cc.NetworkProto.Text}),
@@ -676,7 +676,7 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("codecMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &rt)
+	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", rt))
 	for _, cc := range rt.Row {
 		cc_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_codec_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": cc.Type.Text, "name": cc.Name.Text, "ikey": cc.Ikey.Text}),
@@ -749,7 +749,13 @@ func (c *Collector) fetchGroupedCallCounts(command string) (map[string]int, erro
 
 	groups := make(map[string]int)
 	for _, row := range rows {
-		group := callGroup(row)
+		group, err := c.groupForCallRow(row)
+		if err != nil {
+			level.Debug(c.logger).Log("msg", "failed to fetch call group variable", "err", err)
+		}
+		if group == "" {
+			group = callGroup(row)
+		}
 		if group == "" {
 			continue
 		}
@@ -757,6 +763,45 @@ func (c *Collector) fetchGroupedCallCounts(command string) (map[string]int, erro
 	}
 
 	return groups, nil
+}
+
+func (c *Collector) groupForCallRow(row map[string]interface{}) (string, error) {
+	for _, uuidKey := range []string{"uuid", "call_uuid", "b_uuid"} {
+		uuid := stringField(row, uuidKey)
+		if uuid == "" {
+			continue
+		}
+
+		response, err := c.fsCommand("api uuid_getvar " + uuid + " data")
+		if err != nil {
+			return "", err
+		}
+
+		group := cleanVariableValue(response)
+		if group != "" {
+			return group, nil
+		}
+	}
+
+	return "", nil
+}
+
+func cleanVariableValue(value []byte) string {
+	group := strings.TrimSpace(string(value))
+	if group == "" || group == "_undef_" || strings.HasPrefix(group, "-ERR") {
+		return ""
+	}
+
+	return group
+}
+
+func stringField(row map[string]interface{}, key string) string {
+	value, ok := row[key].(string)
+	if !ok {
+		return ""
+	}
+
+	return strings.TrimSpace(value)
 }
 
 func groupedCallRows(response []byte) ([]map[string]interface{}, error) {
@@ -852,7 +897,7 @@ func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("vertoMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &vt)
+	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", vt))
 	for _, cc := range vt.Profile {
 		vt_status := 0
 		if cc.State.Text == "RUNNING" {
