@@ -9,7 +9,17 @@ func TestCallGroup(t *testing.T) {
 		want string
 	}{
 		{
-			name: "top-level data",
+			name: "top-level group",
+			row:  map[string]interface{}{"group": "telemed"},
+			want: "telemed",
+		},
+		{
+			name: "top-level variable_group",
+			row:  map[string]interface{}{"variable_group": "telemed"},
+			want: "telemed",
+		},
+		{
+			name: "top-level data fallback",
 			row:  map[string]interface{}{"data": "sales"},
 			want: "sales",
 		},
@@ -24,7 +34,7 @@ func TestCallGroup(t *testing.T) {
 			want: "support",
 		},
 		{
-			name: "nested variables data",
+			name: "nested variables data fallback",
 			row:  map[string]interface{}{"variables": map[string]interface{}{"data": "billing"}},
 			want: "billing",
 		},

@@ -119,8 +119,8 @@ The exporter will try to fetch values from the following commands:
 - `api show codec` all used codec
 - `registration` all sofia registration details
 - `api memory` get freeswitch memory info
-- `api show calls` and `api uuid_getvar <uuid> data` grouped by the `data` channel variable
-- `api show bridged_calls` and `api uuid_getvar <uuid> data` grouped by the `data` channel variable
+- `api show calls` and `api uuid_getvar <uuid> group` grouped by the `group` channel variable
+- `api show bridged_calls` and `api uuid_getvar <uuid> group` grouped by the `group` channel variable
 
 List of exposed metrics:
 
@@ -225,12 +225,12 @@ List of exposed metrics:
 
 ### Grouped call metrics
 
-To expose call counts per user group, set a FreeSWITCH channel variable named `data` in the dialplan, for example `set data=sales`. The exporter lists calls with `api show calls` / `api show bridged_calls`, reads each call's `data` variable with `api uuid_getvar <uuid> data`, and exports:
+To expose call counts per user group, set a FreeSWITCH channel variable named `group` in the dialplan, for example `set group=sales`. The exporter lists calls with `api show calls` / `api show bridged_calls`, reads each call's `group` variable with `api uuid_getvar <uuid> group`, and exports:
 
 - `freeswitch_current_calls_by_group{group="..."}`
 - `freeswitch_bridged_calls_by_group{group="..."}`
 
-Calls without the `data` variable are exported with `group="unknown"` and still remain included in the existing aggregate call metrics.
+Calls without the `group` variable are exported with `group="unknown"` and still remain included in the existing aggregate call metrics.
 
 ## Compiling
 

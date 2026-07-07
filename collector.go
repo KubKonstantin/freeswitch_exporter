@@ -772,18 +772,24 @@ func (c *Collector) groupForCallRow(row map[string]interface{}) (string, error) 
 			continue
 		}
 
-		response, err := c.fsCommand("api uuid_getvar " + uuid + " data")
-		if err != nil {
-			return "", err
-		}
+		for _, variable := range groupVariableNames() {
+			response, err := c.fsCommand("api uuid_getvar " + uuid + " " + variable)
+			if err != nil {
+				return "", err
+			}
 
-		group := cleanVariableValue(response)
-		if group != "" {
-			return group, nil
+			group := cleanVariableValue(response)
+			if group != "" {
+				return group, nil
+			}
 		}
 	}
 
 	return "", nil
+}
+
+func groupVariableNames() []string {
+	return []string{"group", "data"}
 }
 
 func cleanVariableValue(value []byte) string {
@@ -863,8 +869,12 @@ func parseCSVLine(line string) ([]string, error) {
 	return reader.Read()
 }
 
+func groupFieldNames() []string {
+	return []string{"group", "variable_group", "data", "presence_data", "variable_data"}
+}
+
 func callGroup(row map[string]interface{}) string {
-	for _, key := range []string{"data", "presence_data", "variable_data"} {
+	for _, key := range groupFieldNames() {
 		if value, ok := row[key].(string); ok && value != "" {
 			return value
 		}
@@ -875,7 +885,7 @@ func callGroup(row map[string]interface{}) string {
 		return ""
 	}
 
-	for _, key := range []string{"data", "presence_data", "variable_data"} {
+	for _, key := range groupFieldNames() {
 		if value, ok := variables[key].(string); ok && value != "" {
 			return value
 		}
