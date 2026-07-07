@@ -381,7 +381,7 @@ func (c *Collector) loadModuleMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("loadModuleMetrics error: &cfgs", err)
 	}
-	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", cfgs))
+	level.Debug(c.logger).Log("msg", "loaded module configuration", "modules", len(cfgs.Modules.Load))
 	fsLoadModules := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "freeswitch_load_module",
@@ -425,7 +425,7 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("sofiaStatusMetrics error: &gw", err)
 	}
-	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", gw))
+	level.Debug(c.logger).Log("msg", "loaded sofia gateways", "gateways", len(gw.Gateway))
 	for _, gateway := range gw.Gateway {
 		status := 0
 		if gateway.Status == "UP" {
@@ -616,7 +616,7 @@ func (c *Collector) endpointMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("endpointMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", rt))
+	level.Debug(c.logger).Log("msg", "loaded endpoints", "rows", len(rt.Row))
 	for _, ep := range rt.Row {
 		ep_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_endpoint_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": ep.Type.Text, "name": ep.Name.Text, "ikey": ep.Ikey.Text}),
@@ -646,7 +646,7 @@ func (c *Collector) registrationsMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("registrationsMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", rt))
+	level.Debug(c.logger).Log("msg", "loaded registrations", "rows", len(rt.Row))
 	for _, cc := range rt.Row {
 		cc_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_registration_defails", "freeswitch registration status", nil, prometheus.Labels{"reg_user": cc.RegUser.Text, "hostname": cc.Hostname.Text, "realm": cc.Realm.Text, "token": cc.Token.Text, "url": cc.Url.Text, "expires": cc.Expires.Text, "network_ip": cc.NetworkIp.Text, "network_port": cc.NetworkPort.Text, "network_proto": cc.NetworkProto.Text}),
@@ -676,7 +676,7 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("codecMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", rt))
+	level.Debug(c.logger).Log("msg", "loaded codecs", "rows", len(rt.Row))
 	for _, cc := range rt.Row {
 		cc_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_codec_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": cc.Type.Text, "name": cc.Name.Text, "ikey": cc.Ikey.Text}),
@@ -757,7 +757,7 @@ func (c *Collector) fetchGroupedCallCounts(command string) (map[string]int, erro
 			group = callGroup(row)
 		}
 		if group == "" {
-			continue
+			group = "unknown"
 		}
 		groups[group]++
 	}
@@ -895,9 +895,13 @@ func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
 	decode.CharsetReader = charset.NewReaderLabel
 	err = decode.Decode(&vt)
 	if err != nil {
+		if err == io.EOF {
+			level.Debug(c.logger).Log("msg", "verto status is empty")
+			return nil
+		}
 		log.Println("vertoMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("response", fmt.Sprintf("%+v", vt))
+	level.Debug(c.logger).Log("msg", "loaded verto profiles", "profiles", len(vt.Profile))
 	for _, cc := range vt.Profile {
 		vt_status := 0
 		if cc.State.Text == "RUNNING" {

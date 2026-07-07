@@ -230,7 +230,7 @@ To expose call counts per user group, set a FreeSWITCH channel variable named `d
 - `freeswitch_current_calls_by_group{group="..."}`
 - `freeswitch_bridged_calls_by_group{group="..."}`
 
-Calls without the `data` variable are skipped for grouped metrics and still remain included in the existing aggregate call metrics.
+Calls without the `data` variable are exported with `group="unknown"` and still remain included in the existing aggregate call metrics.
 
 ## Compiling
 
