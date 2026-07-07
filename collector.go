@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -313,6 +315,10 @@ func (c *Collector) scrape(ch chan<- prometheus.Metric) error {
 		return err
 	}
 
+	if err = c.groupCallMetrics(ch); err != nil {
+		return err
+	}
+
 	if err = c.vertoMetrics(ch); err != nil {
 		return err
 	}
@@ -375,7 +381,7 @@ func (c *Collector) loadModuleMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("loadModuleMetrics error: &cfgs", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &cfgs)
+	level.Debug(c.logger).Log("msg", "loaded module configuration", "modules", len(cfgs.Modules.Load))
 	fsLoadModules := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "freeswitch_load_module",
@@ -419,7 +425,7 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("sofiaStatusMetrics error: &gw", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &gw)
+	level.Debug(c.logger).Log("msg", "loaded sofia gateways", "gateways", len(gw.Gateway))
 	for _, gateway := range gw.Gateway {
 		status := 0
 		if gateway.Status == "UP" {
@@ -610,7 +616,7 @@ func (c *Collector) endpointMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("endpointMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &rt)
+	level.Debug(c.logger).Log("msg", "loaded endpoints", "rows", len(rt.Row))
 	for _, ep := range rt.Row {
 		ep_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_endpoint_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": ep.Type.Text, "name": ep.Name.Text, "ikey": ep.Ikey.Text}),
@@ -640,7 +646,7 @@ func (c *Collector) registrationsMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("registrationsMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &rt)
+	level.Debug(c.logger).Log("msg", "loaded registrations", "rows", len(rt.Row))
 	for _, cc := range rt.Row {
 		cc_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_registration_defails", "freeswitch registration status", nil, prometheus.Labels{"reg_user": cc.RegUser.Text, "hostname": cc.Hostname.Text, "realm": cc.Realm.Text, "token": cc.Token.Text, "url": cc.Url.Text, "expires": cc.Expires.Text, "network_ip": cc.NetworkIp.Text, "network_port": cc.NetworkPort.Text, "network_proto": cc.NetworkProto.Text}),
@@ -670,7 +676,7 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 	if err != nil {
 		log.Println("codecMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &rt)
+	level.Debug(c.logger).Log("msg", "loaded codecs", "rows", len(rt.Row))
 	for _, cc := range rt.Row {
 		cc_load, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_codec_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": cc.Type.Text, "name": cc.Name.Text, "ikey": cc.Ikey.Text}),
@@ -687,6 +693,207 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 	return nil
 }
 
+func (c *Collector) groupCallMetrics(ch chan<- prometheus.Metric) error {
+	groupedMetrics := []struct {
+		name    string
+		help    string
+		command string
+	}{
+		{
+			name:    "current_calls_by_group",
+			help:    "Number of active calls by FreeSWITCH data channel variable",
+			command: "api show calls",
+		},
+		{
+			name:    "bridged_calls_by_group",
+			help:    "Number of bridged calls by FreeSWITCH data channel variable",
+			command: "api show bridged_calls",
+		},
+	}
+
+	for _, metricDef := range groupedMetrics {
+		groups, err := c.fetchGroupedCallCounts(metricDef.command)
+		if err != nil {
+			level.Debug(c.logger).Log("msg", "failed to fetch grouped call metrics", "metric", metricDef.name, "err", err)
+			continue
+		}
+
+		for group, count := range groups {
+			metric, err := prometheus.NewConstMetric(
+				prometheus.NewDesc(namespace+"_"+metricDef.name, metricDef.help, []string{"group"}, nil),
+				prometheus.GaugeValue,
+				float64(count),
+				group,
+			)
+			if err != nil {
+				return err
+			}
+
+			ch <- metric
+		}
+	}
+
+	return nil
+}
+
+func (c *Collector) fetchGroupedCallCounts(command string) (map[string]int, error) {
+	response, err := c.fsCommand(command)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := groupedCallRows(response)
+	if err != nil {
+		return nil, fmt.Errorf("failed parse response for command %s: %w", command, err)
+	}
+
+	groups := make(map[string]int)
+	for _, row := range rows {
+		group, err := c.groupForCallRow(row)
+		if err != nil {
+			level.Debug(c.logger).Log("msg", "failed to fetch call group variable", "err", err)
+		}
+		if group == "" {
+			group = callGroup(row)
+		}
+		if group == "" {
+			group = "unknown"
+		}
+		groups[group]++
+	}
+
+	return groups, nil
+}
+
+func (c *Collector) groupForCallRow(row map[string]interface{}) (string, error) {
+	for _, uuidKey := range []string{"uuid", "call_uuid", "b_uuid"} {
+		uuid := stringField(row, uuidKey)
+		if uuid == "" {
+			continue
+		}
+
+		for _, variable := range groupVariableNames() {
+			response, err := c.fsCommand("api uuid_getvar " + uuid + " " + variable)
+			if err != nil {
+				return "", err
+			}
+
+			group := cleanVariableValue(response)
+			if group != "" {
+				return group, nil
+			}
+		}
+	}
+
+	return "", nil
+}
+
+func groupVariableNames() []string {
+	return []string{"group", "data"}
+}
+
+func cleanVariableValue(value []byte) string {
+	group := strings.TrimSpace(string(value))
+	if group == "" || group == "_undef_" || strings.HasPrefix(group, "-ERR") {
+		return ""
+	}
+
+	return group
+}
+
+func stringField(row map[string]interface{}, key string) string {
+	value, ok := row[key].(string)
+	if !ok {
+		return ""
+	}
+
+	return strings.TrimSpace(value)
+}
+
+func groupedCallRows(response []byte) ([]map[string]interface{}, error) {
+	var result struct {
+		Rows []map[string]interface{} `json:"rows"`
+	}
+	if err := json.Unmarshal(response, &result); err == nil {
+		return result.Rows, nil
+	}
+
+	return parseShowRows(response)
+}
+
+func parseShowRows(response []byte) ([]map[string]interface{}, error) {
+	lines := make([]string, 0)
+	scanner := bufio.NewScanner(bytes.NewReader(response))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "+OK") || strings.HasSuffix(line, " total.") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(lines) == 0 {
+		return nil, nil
+	}
+
+	header, err := parseCSVLine(lines[0])
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]map[string]interface{}, 0, len(lines)-1)
+	for _, line := range lines[1:] {
+		fields, err := parseCSVLine(line)
+		if err != nil {
+			return nil, err
+		}
+		row := make(map[string]interface{}, len(header))
+		for i, key := range header {
+			if i >= len(fields) {
+				break
+			}
+			row[key] = fields[i]
+		}
+		rows = append(rows, row)
+	}
+
+	return rows, nil
+}
+
+func parseCSVLine(line string) ([]string, error) {
+	reader := csv.NewReader(strings.NewReader(line))
+	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
+	return reader.Read()
+}
+
+func groupFieldNames() []string {
+	return []string{"group", "variable_group", "data", "presence_data", "variable_data"}
+}
+
+func callGroup(row map[string]interface{}) string {
+	for _, key := range groupFieldNames() {
+		if value, ok := row[key].(string); ok && value != "" {
+			return value
+		}
+	}
+
+	variables, ok := row["variables"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	for _, key := range groupFieldNames() {
+		if value, ok := variables[key].(string); ok && value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
 func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
 	response, err := c.fsCommand("api verto xmlstatus")
 
@@ -698,9 +905,13 @@ func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
 	decode.CharsetReader = charset.NewReaderLabel
 	err = decode.Decode(&vt)
 	if err != nil {
+		if err == io.EOF {
+			level.Debug(c.logger).Log("msg", "verto status is empty")
+			return nil
+		}
 		log.Println("vertoMetrics error: &rt", err)
 	}
-	level.Debug(c.logger).Log("[response]:", &vt)
+	level.Debug(c.logger).Log("msg", "loaded verto profiles", "profiles", len(vt.Profile))
 	for _, cc := range vt.Profile {
 		vt_status := 0
 		if cc.State.Text == "RUNNING" {
